@@ -15,6 +15,18 @@ linters:
     - unparam
     - goconst
     - gosec
+  disable:
+    - maligned
+    - lll
+    - dupl
+    - gocyclo
+    - depguard
+    - nakedret
+    - interfacer
+    - funlen
+    - wsl
+    - prealloc
+    - scopelint
 
 linters-settings:
   revive:
