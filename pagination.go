@@ -116,7 +116,9 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-func forwardedProto(r *http.Request) string { return strings.ToLower(r.Header.Get("X-Forwarded-Proto")) }
+func forwardedProto(r *http.Request) string {
+	return strings.ToLower(r.Header.Get("X-Forwarded-Proto"))
+}
 
 func forwardedHost(r *http.Request) string { return r.Header.Get("X-Forwarded-Host") }
 
@@ -126,7 +128,7 @@ func (o *BuildOptions) normalize(r *http.Request) {
 		o.PageParam = "page"
 	}
 	if o.Path == "" {
-		o.Path = r.URL.Path // Thay thế c.Path() bằng r.URL.Path
+		o.Path = r.URL.Path
 	}
 	if !o.KeepExistingQuery {
 		o.KeepExistingQuery = true
