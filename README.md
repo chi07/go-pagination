@@ -78,3 +78,31 @@ absoluteURL := pagination.BuildPageURL(r, 4, opts)
 // absoluteURL: https://api.example.com/api/items?limit=10&page=4&q=go
 ```
 
+3. Tạo View Model (NewView)
+   Sử dụng NewView để tạo mô hình dữ liệu sẵn sàng cho template, bao gồm cả tính năng Sliding Window.
+```go
+// Giả sử đang ở trang 5 trên tổng số 20 trang
+current := 5
+total := 20
+windowSize := 5 // Hiển thị 5 trang liên tiếp
+
+view := pagination.NewView(r, current, total, nil, windowSize)
+
+// view.Pages sẽ chứa:
+// [PageItem{Num: 3, ...}, PageItem{Num: 4, ...}, PageItem{Num: 5, Active: true, ...}, PageItem{Num: 6, ...}, PageItem{Num: 7, ...}]
+```
+
+render thanh phân trang hoàn chỉnh.
+```go
+{{if .PrevURL}}
+    <a href="{{.PrevURL}}">Previous</a>
+{{end}}
+
+{{range .Pages}}
+    <a href="{{.URL}}" class="{{if .Active}}active{{end}}">{{.Num}}</a>
+{{end}}
+
+{{if .NextURL}}
+    <a href="{{.NextURL}}">Next</a>
+{{end}}
+```
