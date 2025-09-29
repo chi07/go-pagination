@@ -6,206 +6,218 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chi07/pagination" // Đảm bảo đúng module path
+	"github.com/chi07/pagination"
 )
 
-// =========================================================================================
-// Paginator (Core Logic) Tests
-// =========================================================================================
-
-type paginatorTestCase struct {
-	name                string
-	totalItems          int64
-	currentPage         int64
-	limit               int64
-	expectedPerPage     int64
-	expectedCurrentPage int64
-	expectedTotalItems  int64
-	expectedTotalPages  int64
-	expectedOffset      int64
-	expectedItemCount   int64
-	expectedHasPrevious bool
-	expectedHasNext     bool
-	expectedPrevPage    int64
-	expectedNextPage    int64
-}
-
-func checkPaginator(t *testing.T, p *pagination.Paginator, tc paginatorTestCase) {
-	if p.PerPage != tc.expectedPerPage {
-		t.Errorf("PerPage got %d, want %d", p.PerPage, tc.expectedPerPage)
-	}
-	if p.CurrentPage != tc.expectedCurrentPage {
-		t.Errorf("CurrentPage got %d, want %d", p.CurrentPage, tc.expectedCurrentPage)
-	}
-	if p.TotalItems != tc.expectedTotalItems {
-		t.Errorf("TotalItems got %d, want %d", p.TotalItems, tc.expectedTotalItems)
-	}
-	if p.TotalPages != tc.expectedTotalPages {
-		t.Errorf("TotalPages got %d, want %d", p.TotalPages, tc.expectedTotalPages)
-	}
-	if p.Offset != tc.expectedOffset {
-		t.Errorf("Offset got %d, want %d", p.Offset, tc.expectedOffset)
-	}
-	if p.ItemCount != tc.expectedItemCount {
-		t.Errorf("ItemCount got %d, want %d", p.ItemCount, tc.expectedItemCount)
-	}
-	if p.HasPrevious != tc.expectedHasPrevious {
-		t.Errorf("HasPrevious got %t, want %t", p.HasPrevious, tc.expectedHasPrevious)
-	}
-	if p.HasNext != tc.expectedHasNext {
-		t.Errorf("HasNext got %t, want %t", p.HasNext, tc.expectedHasNext)
-	}
-	if p.PrevPage != tc.expectedPrevPage {
-		t.Errorf("PrevPage got %d, want %d", p.PrevPage, tc.expectedPrevPage)
-	}
-	if p.NextPage != tc.expectedNextPage {
-		t.Errorf("NextPage got %d, want %d", p.NextPage, tc.expectedNextPage)
-	}
-}
-
-func TestNewPaginator(t *testing.T) {
-	testCases := []paginatorTestCase{
-		{
-			name:       "Case 1: Trang giữa",
-			totalItems: 100, currentPage: 5, limit: 10,
-			expectedPerPage: 10, expectedCurrentPage: 5, expectedTotalItems: 100,
-			expectedTotalPages: 10, expectedOffset: 40, expectedItemCount: 10,
-			expectedHasPrevious: true, expectedHasNext: true, expectedPrevPage: 4, expectedNextPage: 6,
-		},
-		{
-			name:       "Case 5: Limit = 0 (dùng default 10)",
-			totalItems: 25, currentPage: 1, limit: 0,
-			expectedPerPage: 10, expectedCurrentPage: 1, expectedTotalItems: 25,
-			expectedTotalPages: 3, expectedOffset: 0, expectedItemCount: 10,
-			expectedHasPrevious: false, expectedHasNext: true, expectedPrevPage: 0, expectedNextPage: 2,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := pagination.NewPaginator(tc.totalItems, tc.currentPage, tc.limit)
-			checkPaginator(t, p, tc)
-		})
-	}
-}
-
-// =========================================================================================
-// URL Builder and View Model Tests
-// =========================================================================================
+// ---------------------- Helpers ----------------------
 
 func mockHTTPRequest(uri, host string, headers map[string]string) *http.Request {
-	req, _ := http.NewRequest("GET", uri, nil)
+	req, _ := http.NewRequest(http.MethodGet, uri, nil)
 
 	if host != "" {
 		req.Host = host
 	} else {
 		req.Host = "localhost:8080"
 	}
-
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	isHTTPS := req.URL.Scheme == "https" || strings.HasSuffix(req.Host, ":443")
-
-	if isHTTPS {
+	// Mark TLS if https or :443 to emulate secure transport
+	if strings.HasPrefix(uri, "https://") || strings.HasSuffix(req.Host, ":443") {
 		req.TLS = &tls.ConnectionState{}
 	}
-
 	return req
 }
 
-func TestBuildPageURL(t *testing.T) {
+func want(t *testing.T, name string, got, expected any) {
+	t.Helper()
+	if got != expected {
+		t.Fatalf("%s: got %v, want %v", name, got, expected)
+	}
+}
+
+// ---------------------- Paginator Tests ----------------------
+
+func TestNewPaginator_EdgesAndNormal(t *testing.T) {
 	tests := []struct {
-		name     string
-		uri      string
-		host     string
-		page     int
-		opts     *pagination.BuildOptions
-		headers  map[string]string
-		expected string
+		name                     string
+		totalItems               int64
+		currentPage              int64
+		limit                    int64
+		wantPerPage              int64
+		wantCurrentPage          int64
+		wantTotalPages           int64
+		wantOffset               int64
+		wantItemCount            int64
+		wantHasPrev, wantHasNext bool
+		wantPrev, wantNext       int64
 	}{
 		{
-			name:     "Relative URL, giữ query mặc định",
-			uri:      "http://localhost/api/items?q=test&limit=20&page=5",
-			page:     3,
-			opts:     nil,
-			expected: "/api/items?limit=20&page=3&q=test", // Alphabetical order: limit, page, q
+			name:       "Middle page",
+			totalItems: 100, currentPage: 5, limit: 10,
+			wantPerPage: 10, wantCurrentPage: 5, wantTotalPages: 10,
+			wantOffset: 40, wantItemCount: 10,
+			wantHasPrev: true, wantHasNext: true,
+			wantPrev: 4, wantNext: 6,
 		},
 		{
-			name: "Absolute URL, dùng X-Forwarded headers",
-			uri:  "http://local/api/items?q=test",
-			host: "local",
-			page: 2,
-			opts: &pagination.BuildOptions{Mode: pagination.Absolute},
-			headers: map[string]string{
-				"X-Forwarded-Proto": "https",
-				"X-Forwarded-Host":  "api.example.com",
-			},
-			expected: "https://api.example.com/api/items?page=2&q=test", // Alphabetical order: page, q
+			name:       "First page",
+			totalItems: 23, currentPage: 1, limit: 5,
+			wantPerPage: 5, wantCurrentPage: 1, wantTotalPages: 5,
+			wantOffset: 0, wantItemCount: 5,
+			wantHasPrev: false, wantHasNext: true,
+			wantPrev: 0, wantNext: 2,
 		},
 		{
-			name:     "Absolute URL, dùng r.Host và Scheme mặc định (HTTP)",
-			uri:      "http://local/products",
-			host:     "api.mysite.com", // r.Host
-			page:     4,
-			opts:     &pagination.BuildOptions{Mode: pagination.Absolute},
-			expected: "http://api.mysite.com/products?page=4",
+			name:       "Last page partial",
+			totalItems: 23, currentPage: 5, limit: 5,
+			wantPerPage: 5, wantCurrentPage: 5, wantTotalPages: 5,
+			wantOffset: 20, wantItemCount: 3,
+			wantHasPrev: true, wantHasNext: false,
+			wantPrev: 4, wantNext: 0,
 		},
 		{
-			name:     "Absolute URL, HTTPS từ URI (dùng r.TLS)",
-			uri:      "https://secure.com/data",
-			host:     "secure.com",
-			page:     1,
-			opts:     &pagination.BuildOptions{Mode: pagination.Absolute},
-			expected: "https://secure.com/data?page=1",
+			name:       "Clamp currentPage > totalPages",
+			totalItems: 12, currentPage: 99, limit: 5,
+			wantPerPage: 5, wantCurrentPage: 3, wantTotalPages: 3,
+			wantOffset: 10, wantItemCount: 2,
+			wantHasPrev: true, wantHasNext: false,
+			wantPrev: 2, wantNext: 0,
+		},
+		{
+			name:       "Clamp currentPage < 1",
+			totalItems: 12, currentPage: 0, limit: 5,
+			wantPerPage: 5, wantCurrentPage: 1, wantTotalPages: 3,
+			wantOffset: 0, wantItemCount: 5,
+			wantHasPrev: false, wantHasNext: true,
+			wantPrev: 0, wantNext: 2,
+		},
+		{
+			name:       "PerPage defaulted to 10 when <= 0",
+			totalItems: 25, currentPage: 1, limit: 0,
+			wantPerPage: 10, wantCurrentPage: 1, wantTotalPages: 3,
+			wantOffset: 0, wantItemCount: 10,
+			wantHasPrev: false, wantHasNext: true,
+			wantPrev: 0, wantNext: 2,
+		},
+		{
+			name:       "No items: normalized to page 1, totals=1",
+			totalItems: 0, currentPage: 5, limit: 10,
+			wantPerPage: 10, wantCurrentPage: 1, wantTotalPages: 1,
+			wantOffset: 0, wantItemCount: 0,
+			wantHasPrev: false, wantHasNext: false,
+			wantPrev: 0, wantNext: 0,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := mockHTTPRequest(tt.uri, tt.host, tt.headers)
-
-			got := pagination.BuildPageURL(r, tt.page, tt.opts)
-			if got != tt.expected {
-				t.Errorf("BuildPageURL() got %q, want %q", got, tt.expected)
-			}
+			p := pagination.NewPaginator(tt.totalItems, tt.currentPage, tt.limit)
+			want(t, "PerPage", p.PerPage, tt.wantPerPage)
+			want(t, "CurrentPage", p.CurrentPage, tt.wantCurrentPage)
+			want(t, "TotalPages", p.TotalPages, tt.wantTotalPages)
+			want(t, "Offset", p.Offset, tt.wantOffset)
+			want(t, "ItemCount", p.ItemCount, tt.wantItemCount)
+			want(t, "HasPrevious", p.HasPrevious, tt.wantHasPrev)
+			want(t, "HasNext", p.HasNext, tt.wantHasNext)
+			want(t, "PrevPage", p.PrevPage, tt.wantPrev)
+			want(t, "NextPage", p.NextPage, tt.wantNext)
 		})
 	}
 }
 
-func TestNewView(t *testing.T) {
+// ---------------------- URL Builder Tests ----------------------
+
+func TestBuildPageURL_Relative_KeepQuery_Defaults(t *testing.T) {
+	r := mockHTTPRequest("http://localhost/api/items?q=test&limit=20&page=5", "localhost", nil)
+	got := pagination.BuildPageURL(r, 3, nil) // defaults: Relative, keep query, page param "page"
+	// url.Values.Encode sorts keys alphabetically
+	want(t, "RelativeKeepQuery", got, "/api/items?limit=20&page=3&q=test")
+}
+
+func TestBuildPageURL_Absolute_ForwardedHeaders(t *testing.T) {
+	h := map[string]string{
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "api.example.com",
+	}
+	r := mockHTTPRequest("http://local/api/items?q=test", "local", h)
+	opts := &pagination.BuildOptions{Mode: pagination.Absolute}
+	got := pagination.BuildPageURL(r, 2, opts)
+	want(t, "AbsoluteForwarded", got, "https://api.example.com/api/items?page=2&q=test")
+}
+
+func TestBuildPageURL_Absolute_TLSFromRequest(t *testing.T) {
+	r := mockHTTPRequest("https://secure.com/data?x=1", "secure.com", nil)
+	opts := &pagination.BuildOptions{Mode: pagination.Absolute}
+	got := pagination.BuildPageURL(r, 1, opts)
+	want(t, "AbsoluteTLS", got, "https://secure.com/data?page=1&x=1")
+}
+
+func TestBuildPageURL_Absolute_Overrides(t *testing.T) {
+	r := mockHTTPRequest("http://local/path?a=1", "local", nil)
+	opts := &pagination.BuildOptions{
+		Mode:              pagination.Absolute,
+		Scheme:            "https",
+		Host:              "override.example",
+		Path:              "/custom",
+		PageParam:         "pg",
+		KeepExistingQuery: true,
+	}
+	got := pagination.BuildPageURL(r, 7, opts)
+	want(t, "AbsoluteOverride", got, "https://override.example/custom?a=1&pg=7")
+}
+
+// ---------------------- View (Window) Tests ----------------------
+
+func TestNewView_Windows_Start_Middle_End(t *testing.T) {
 	r := mockHTTPRequest("http://localhost:8080/list?limit=10&foo=bar", "localhost:8080", nil)
 
 	tests := []struct {
-		name          string
-		current       int
-		total         int
-		window        int
-		expectedPages []int
-		expectedPrev  string
-		expectedNext  string
+		name                   string
+		current, total, window int
+		wantPrev, wantNext     string
+		wantPages              []int
+		wantActiveAt           int // index within Pages expected slice
 	}{
 		{
-			name:    "Window = 0 (full render)",
+			name:    "Full window = 0 (renders all)",
 			current: 5, total: 10, window: 0,
-			expectedPages: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-			expectedPrev:  "/list?foo=bar&limit=10&page=4",
-			expectedNext:  "/list?foo=bar&limit=10&page=6",
+			wantPrev:     "/list?foo=bar&limit=10&page=4",
+			wantNext:     "/list?foo=bar&limit=10&page=6",
+			wantPages:    []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			wantActiveAt: 4, // index of '5'
 		},
 		{
-			name:    "Window = 5 (trang cuối)",
-			current: 9, total: 10, window: 5,
-			expectedPages: []int{6, 7, 8, 9, 10},
-			expectedPrev:  "/list?foo=bar&limit=10&page=8",
-			expectedNext:  "/list?foo=bar&limit=10&page=10",
+			name:    "Window 5 at start",
+			current: 1, total: 10, window: 5,
+			wantPrev:     "",
+			wantNext:     "/list?foo=bar&limit=10&page=2",
+			wantPages:    []int{1, 2, 3, 4, 5},
+			wantActiveAt: 0,
 		},
 		{
-			name:    "Current = Total (trang cuối cùng)",
+			name:    "Window 5 middle",
+			current: 6, total: 10, window: 5,
+			wantPrev:     "/list?foo=bar&limit=10&page=5",
+			wantNext:     "/list?foo=bar&limit=10&page=7",
+			wantPages:    []int{4, 5, 6, 7, 8},
+			wantActiveAt: 2,
+		},
+		{
+			name:    "Window 5 at end",
 			current: 10, total: 10, window: 5,
-			expectedPages: []int{6, 7, 8, 9, 10},
-			expectedPrev:  "/list?foo=bar&limit=10&page=9",
-			expectedNext:  "",
+			wantPrev:     "/list?foo=bar&limit=10&page=9",
+			wantNext:     "",
+			wantPages:    []int{6, 7, 8, 9, 10},
+			wantActiveAt: 4,
+		},
+		{
+			name:    "Clamp: current < 1, total < 1 normalize",
+			current: -3, total: 0, window: 5,
+			wantPrev:     "",
+			wantNext:     "/list?foo=bar&limit=10&page=2", // total normalized to 1, but window < total condition fails so pages=1..1
+			wantPages:    []int{1},
+			wantActiveAt: 0,
 		},
 	}
 
@@ -213,15 +225,20 @@ func TestNewView(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			view := pagination.NewView(r, tt.current, tt.total, nil, tt.window)
 
-			if view.PrevURL != tt.expectedPrev {
-				t.Errorf("PrevURL got %q, want %q", view.PrevURL, tt.expectedPrev)
-			}
-			if view.NextURL != tt.expectedNext {
-				t.Errorf("NextURL got %q, want %q", view.NextURL, tt.expectedNext)
+			if view.PrevURL != tt.wantPrev {
+				t.Fatalf("PrevURL got %q, want %q", view.PrevURL, tt.wantPrev)
 			}
 
-			if len(view.Pages) != len(tt.expectedPages) {
-				t.Fatalf("Pages length got %d, want %d", len(view.Pages), len(tt.expectedPages))
+			if len(view.Pages) != len(tt.wantPages) {
+				t.Fatalf("Pages length got %d, want %d", len(view.Pages), len(tt.wantPages))
+			}
+			for i, p := range view.Pages {
+				if p.Num != tt.wantPages[i] {
+					t.Fatalf("Pages[%d].Num got %d, want %d", i, p.Num, tt.wantPages[i])
+				}
+			}
+			if !view.Pages[tt.wantActiveAt].Active {
+				t.Fatalf("Active page not marked active; want index %d number %d", tt.wantActiveAt, tt.wantPages[tt.wantActiveAt])
 			}
 		})
 	}
