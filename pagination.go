@@ -1,11 +1,10 @@
 package pagination
 
 import (
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/gofiber/fiber/v2"
 )
 
 type Paginator struct {
@@ -77,27 +76,16 @@ type View struct {
 type URLMode int
 
 const (
-	// Relative URL: "/courses?foo=bar&page=2"
 	Relative URLMode = iota
-	// Absolute URL: "https://example.com/courses?foo=bar&page=2"
 	Absolute
 )
 
 type BuildOptions struct {
-	// Absolute | Relative (mặc định Relative)
-	Mode URLMode
-
-	// Path muốn dùng (mặc định: c.Path())
-	Path string
-
-	// Tên query param cho trang (mặc định: "page")
-	PageParam string
-
-	// Khi Absolute: cách lấy scheme/host (mặc định tự suy ra từ X-Forwarded-Proto/Host, fall back c.Protocol()/c.Hostname())
-	Scheme string
-	Host   string
-
-	// Có giữ lại các query khác không (mặc định true)
+	Mode              URLMode
+	Path              string
+	PageParam         string
+	Scheme            string
+	Host              string
 	KeepExistingQuery bool
 }
 
@@ -110,18 +98,16 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-func forwardedProto(c *fiber.Ctx) string { return strings.ToLower(c.Get("X-Forwarded-Proto")) }
-func forwardedHost(c *fiber.Ctx) string  { return c.Get("X-Forwarded-Host") }
+func forwardedProto(r *http.Request) string { return strings.ToLower(r.Header.Get("X-Forwarded-Proto")) }
+func forwardedHost(r *http.Request) string  { return r.Header.Get("X-Forwarded-Host") }
 
-func (o *BuildOptions) normalize(c *fiber.Ctx) {
-	// Defaults
+func (o *BuildOptions) normalize(r *http.Request) {
 	if o.PageParam == "" {
 		o.PageParam = "page"
 	}
 	if o.Path == "" {
-		o.Path = c.Path()
+		o.Path = r.URL.Path
 	}
-	// Mặc định giữ nguyên query nếu caller không set
 	if !o.KeepExistingQuery {
 		o.KeepExistingQuery = true
 	}
@@ -133,34 +119,37 @@ func (o *BuildOptions) normalize(c *fiber.Ctx) {
 
 	// Scheme
 	if o.Scheme == "" {
-		o.Scheme = firstNonEmpty(forwardedProto(c), c.Protocol())
+		scheme := "http"
+		if r.TLS != nil || forwardedProto(r) == "https" {
+			scheme = "https"
+		}
+		o.Scheme = scheme
 	}
 
-	// Host
 	if o.Host == "" {
-		o.Host = firstNonEmpty(forwardedHost(c), c.Hostname())
+		o.Host = firstNonEmpty(forwardedHost(r), r.Host)
 	}
 }
 
 // ------------------ URL Builder ------------------
 
-// BuildPageURL tạo URL cho page cụ thể, giữ lại các query khác (trừ page) nếu chọn KeepExistingQuery.
-// BuildPageURL tạo URL cho page cụ thể, giữ lại các query khác (trừ page) nếu chọn KeepExistingQuery.
-func BuildPageURL(c *fiber.Ctx, page int, opts *BuildOptions) string {
+func BuildPageURL(r *http.Request, page int, opts *BuildOptions) string {
 	var o BuildOptions
 	if opts != nil {
 		o = *opts
 	}
-	o.normalize(c)
+	o.normalize(r)
 
 	q := url.Values{}
 
+	existingQuery := r.URL.Query()
+
 	if o.KeepExistingQuery {
-		for k, v := range c.Queries() {
+		for k, v := range existingQuery {
 			if k == o.PageParam {
 				continue
 			}
-			q.Set(k, v)
+			q.Set(k, v[0])
 		}
 	}
 
@@ -180,9 +169,7 @@ func BuildPageURL(c *fiber.Ctx, page int, opts *BuildOptions) string {
 	return o.Path + "?" + q.Encode()
 }
 
-// NewView dựng PaginationVM cho template.
-// window = 0 nghĩa là render hết 1..Total; >0 sẽ render sliding window (ví dụ 5 hiển thị [.. 3 4 5 6 7 ..]).
-func NewView(c *fiber.Ctx, current, total int, opts *BuildOptions, window int) View {
+func NewView(r *http.Request, current, total int, opts *BuildOptions, window int) View {
 	if current < 1 {
 		current = 1
 	}
@@ -193,10 +180,10 @@ func NewView(c *fiber.Ctx, current, total int, opts *BuildOptions, window int) V
 	vm := View{Current: current, Total: total}
 
 	if current > 1 {
-		vm.PrevURL = BuildPageURL(c, current-1, opts)
+		vm.PrevURL = BuildPageURL(r, current-1, opts)
 	}
 	if current < total {
-		vm.NextURL = BuildPageURL(c, current+1, opts)
+		vm.NextURL = BuildPageURL(r, current+1, opts)
 	}
 
 	start, end := 1, total
@@ -220,7 +207,7 @@ func NewView(c *fiber.Ctx, current, total int, opts *BuildOptions, window int) V
 	for i := start; i <= end; i++ {
 		vm.Pages = append(vm.Pages, PageItem{
 			Num:    i,
-			URL:    BuildPageURL(c, i, opts),
+			URL:    BuildPageURL(r, i, opts),
 			Active: i == current,
 		})
 	}
