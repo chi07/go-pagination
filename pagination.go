@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Paginator holds all calculated pagination data for a given set of items.
 type Paginator struct {
 	PerPage     int64
 	CurrentPage int64
@@ -21,6 +22,7 @@ type Paginator struct {
 	NextPage    int64
 }
 
+// NewPaginator creates a new Paginator instance and computes all derived fields.
 func NewPaginator(totalItems, currentPage, limit int64) *Paginator {
 	p := &Paginator{TotalItems: totalItems, CurrentPage: currentPage, PerPage: limit}
 	p.recompute()
@@ -59,12 +61,14 @@ func (p *Paginator) recompute() {
 	}
 }
 
+// PageItem represents a single page link in the navigation view.
 type PageItem struct {
 	Num    int
 	URL    string
 	Active bool
 }
 
+// View holds the necessary data structure for rendering pagination links in a template.
 type View struct {
 	Current int
 	Total   int
@@ -73,19 +77,33 @@ type View struct {
 	Pages   []PageItem
 }
 
+// URLMode defines whether the generated URLs should be relative or absolute.
 type URLMode int
 
 const (
+	// Relative URL: "/courses?foo=bar&page=2"
 	Relative URLMode = iota
+	// Absolute URL: "https://example.com/courses?foo=bar&page=2"
 	Absolute
 )
 
+// BuildOptions contains configuration for building pagination URLs.
 type BuildOptions struct {
-	Mode              URLMode
-	Path              string
-	PageParam         string
-	Scheme            string
-	Host              string
+	// Mode determines if the URL is Absolute or Relative (default Relative).
+	Mode URLMode
+
+	// Path to use for the URL (default: r.URL.Path).
+	Path string
+
+	// PageParam is the query parameter name for the page number (default: "page").
+	PageParam string
+
+	// Scheme and Host are used when Mode is Absolute.
+	// Defaults are inferred from X-Forwarded-Proto/Host or r.URL/r.Host.
+	Scheme string
+	Host   string
+
+	// KeepExistingQuery determines whether to retain other query parameters (default true).
 	KeepExistingQuery bool
 }
 
@@ -99,14 +117,16 @@ func firstNonEmpty(s ...string) string {
 }
 
 func forwardedProto(r *http.Request) string { return strings.ToLower(r.Header.Get("X-Forwarded-Proto")) }
-func forwardedHost(r *http.Request) string  { return r.Header.Get("X-Forwarded-Host") }
+
+func forwardedHost(r *http.Request) string { return r.Header.Get("X-Forwarded-Host") }
 
 func (o *BuildOptions) normalize(r *http.Request) {
+	// Defaults
 	if o.PageParam == "" {
 		o.PageParam = "page"
 	}
 	if o.Path == "" {
-		o.Path = r.URL.Path
+		o.Path = r.URL.Path // Thay thế c.Path() bằng r.URL.Path
 	}
 	if !o.KeepExistingQuery {
 		o.KeepExistingQuery = true
@@ -119,6 +139,7 @@ func (o *BuildOptions) normalize(r *http.Request) {
 
 	// Scheme
 	if o.Scheme == "" {
+		// Scheme: kiểm tra TLS (nếu request được handle bởi HTTPS server) hoặc X-Forwarded-Proto
 		scheme := "http"
 		if r.TLS != nil || forwardedProto(r) == "https" {
 			scheme = "https"
@@ -126,13 +147,15 @@ func (o *BuildOptions) normalize(r *http.Request) {
 		o.Scheme = scheme
 	}
 
+	// Host
 	if o.Host == "" {
+		// Host: kiểm tra X-Forwarded-Host rồi đến r.Host
 		o.Host = firstNonEmpty(forwardedHost(r), r.Host)
 	}
 }
 
-// ------------------ URL Builder ------------------
-
+// BuildPageURL creates a URL string for a specific page number,
+// while optionally preserving other query parameters.
 func BuildPageURL(r *http.Request, page int, opts *BuildOptions) string {
 	var o BuildOptions
 	if opts != nil {
@@ -149,6 +172,7 @@ func BuildPageURL(r *http.Request, page int, opts *BuildOptions) string {
 			if k == o.PageParam {
 				continue
 			}
+			// Lấy giá trị đầu tiên cho query (giống hành vi của Fiber/Query thông thường)
 			q.Set(k, v[0])
 		}
 	}
@@ -169,6 +193,8 @@ func BuildPageURL(r *http.Request, page int, opts *BuildOptions) string {
 	return o.Path + "?" + q.Encode()
 }
 
+// NewView builds the View model for template rendering.
+// If window > 0, it renders a sliding window of pages (e.g., [.. 3 4 5 6 7 ..]).
 func NewView(r *http.Request, current, total int, opts *BuildOptions, window int) View {
 	if current < 1 {
 		current = 1
