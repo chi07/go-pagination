@@ -12,9 +12,10 @@ Thư viện được thiết kế để tách biệt logic tính toán (tính Of
 🚀 Cài đặt
 Sử dụng lệnh go get để cài đặt thư viện:
 
-Bash
-
+```go
 go get github.com/chi07/pagination
+```
+
 ✨ Tính năng chính
 Paginator Logic (Paginator): Tính toán các thông số cần thiết cho truy vấn cơ sở dữ liệu (Offset, ItemCount) và hiển thị (TotalPages, HasNext, PrevPage).
 
