@@ -23,8 +23,8 @@ type Paginator struct {
 }
 
 // NewPaginator creates a new Paginator instance and computes all derived fields.
-func NewPaginator(totalItems, currentPage, limit int64) *Paginator {
-	p := &Paginator{TotalItems: totalItems, CurrentPage: currentPage, PerPage: limit}
+func NewPaginator(totalItems, currentPage, limit int64) Paginator {
+	p := Paginator{TotalItems: totalItems, CurrentPage: currentPage, PerPage: limit}
 	p.recompute()
 	return p
 }
